@@ -4,4 +4,5 @@
 <properties>
 <comment>A sample configuration file.</comment>
 <entry key="stockmarket.classes">stockmarket.g0.RandomPlayer</entry>
+<entry key="stockmarket.classes">stockmarket.g0.SVMPlayer</entry>
 </properties>

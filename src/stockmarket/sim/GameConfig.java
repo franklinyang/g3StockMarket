@@ -127,8 +127,8 @@ public class GameConfig implements Cloneable{
 				            theClass = Class.forName(className, false,this.getClass().getClassLoader());
 				            if(theClass.getSuperclass() != null && theClass.getSuperclass().toString().equals("class stockmarket.sim.Player"))
 				            {
-				            	if(!availablePlayers.contains((Class<Player>) theClass))
-				            		availablePlayers.add((Class<Player>) theClass);
+//				            	if(!availablePlayers.contains((Class<Player>) theClass))
+//				            		availablePlayers.add((Class<Player>) theClass);
 				            }
 				          }catch(NoClassDefFoundError e){
 				            continue;
