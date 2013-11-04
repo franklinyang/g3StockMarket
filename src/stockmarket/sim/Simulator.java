@@ -15,11 +15,11 @@ public class Simulator {
 	private double 					STARTING_CAPITAL				= 100000;
 	private double					TRANSACTIONFEE					= 5;
 	private int 					NUM_STOCKS						= 10;
-    public static final int        	MAX_ROUNDS     					= 525;
+    public static final int        	MAX_ROUNDS     					= 26;
 	private static final int		TRAINING_ROUNDS					= 25;
 	private static final double		PROB_NO_INFLUANCE	  		 	= .3;
 	private static final double		STRENGTH_OF_TRENDS	  		 	= .5;
-	private static final double		RANDOM_STOCK_VARIATIONLIMIT 	= .2;
+	private static final double		RANDOM_STOCK_VARIATIONLIMIT 	= .002;
 	private static final int		STOCK_MAX_PRICE					= 800;
 	private static final int		STOCK_MIN_PRICE					= 50;
 	
@@ -273,7 +273,7 @@ public class Simulator {
 	private void updateStockPrice(int round, Stock stock, ArrayList<Trade> marketTrades, ArrayList<Double> formula){
 		int popularity = 0;
 		for(Trade trade : marketTrades){
-			if (trade.getStock() == stock){
+			if (trade.getStock().getName() == stock.getName()){
 				popularity += trade.getQuantity();
 			}
 		}
@@ -291,7 +291,7 @@ public class Simulator {
 	 */
 	private double calculateStockPrice(Stock stock, int popularity, ArrayList<Double> formula){
 		double newPrice = 0;
-		newPrice += RANDOM_STOCK_VARIATIONLIMIT * random.nextDouble();
+		newPrice += (stock.currentPrice() * getRandomBetween(-1*RANDOM_STOCK_VARIATIONLIMIT, RANDOM_STOCK_VARIATIONLIMIT));
 		
 		//change from indicators
 		for (int i = 0; i < indicators.size(); i++){
