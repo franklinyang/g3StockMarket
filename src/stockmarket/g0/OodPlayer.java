@@ -10,15 +10,16 @@ import stockmarket.sim.EconomicIndicator;
 import stockmarket.sim.Portfolio;
 import stockmarket.sim.Stock;
 import stockmarket.sim.Trade;
-
+import stockmarket.LinearRegression.*;
 /**
  * @author Anne
  *
  */
-public class RandomPlayer extends stockmarket.sim.Player {
+public class OodPlayer extends stockmarket.sim.Player {
 	private Random random;
+	double[][] regressionOutput;
 	
-	public RandomPlayer(){
+	public OodPlayer(){
 		name = "Random Player";
 		random = new Random();
 	}
@@ -26,13 +27,39 @@ public class RandomPlayer extends stockmarket.sim.Player {
 	@Override
 	public void learn(ArrayList<EconomicIndicator> indicators,
 			ArrayList<Stock> stocks) {
-		System.out.println("Indicators");
-		for (EconomicIndicator indicator : indicators){
-			System.out.println(indicator);
+		ArrayList<Double> indicatorHistory;
+		
+		regressionOutput = new double[indicators.size()][indicators.get(0).getHistory().size()];
+		
+		// setting x in LinearRegression.implementation
+		double[][] trainingData = new double[indicators.size()][indicators.get(0).getHistory().size()];
+		for(int i = 0; i < indicators.size(); i++) {
+			indicatorHistory = indicators.get(i).getHistory();
+			for(int j = 0; j < trainingData[i].length; j++) {
+				trainingData[i][j] = indicatorHistory.get(j);
+			}
 		}
-		System.out.println("Stocks");
-		for (Stock stock : stocks){
-			System.out.println(stock);
+		
+		// setting y in LinearRegression.implementation
+		for(int s = 0; s < stocks.size(); s++) {
+			ArrayList<Double> stockHistory = stocks.get(s).getHistory();
+			double[] stockData = new double[stocks.get(s).getHistory().size()];
+			double[] coeffs = new double[indicators.size()];
+			for(int i = 0; i < stockData.length; i++) {
+				stockData[i] = stockHistory.get(i);
+			}
+			int m = indicators.size();
+			LinearRegression.implemation(trainingData, stockData, indicators.size(), stockData.length, coeffs, new double[4], new double[m]);
+			for(int t = 0; t < m; t++) {
+				regressionOutput[t][s] = coeffs[t];
+			}
+		}
+		for(int i = 0; i < regressionOutput.length; i++) {
+			System.err.println("+++++++++++++++++++++++++++++++++++++++++");
+			System.err.println("Stock " + i);
+			for(int j = 0; j < regressionOutput[0].length; j++) {
+				System.err.print(regressionOutput[i][j] + ", ");
+			}
 		}
 	}
 

@@ -1,4 +1,4 @@
-package LinearRegression;
+package stockmarket.LinearRegression;
 
 public class LinearRegression {
 	
