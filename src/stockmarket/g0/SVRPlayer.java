@@ -1,10 +1,11 @@
-/**
- * 
- */
 package stockmarket.g0;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Random;
+import java.util.Collections;
 
 import stockmarket.sim.EconomicIndicator;
 import stockmarket.sim.Portfolio;
@@ -35,12 +36,16 @@ import stockmarket.libsvm.libsvm.*;
 //	public static int svm_check_probability_model(svm_model model);
 //	public static void svm_set_print_string_function(svm_print_interface print_func);
 
-public class SVMPlayer extends stockmarket.sim.Player {
+public class SVRPlayer extends stockmarket.sim.Player {
 	private Random random;
 	private double transactionFee = 5;
+	private ArrayList<Double> indicatorMax;
+	private ArrayList<Double> indicatorMin;
+	private HashMap<Stock,Double> stockMax = new HashMap<Stock,Double>();
+	private HashMap<Stock,Double> stockMin = new HashMap<Stock,Double>();
 	
-	public SVMPlayer(){
-		name = "Random Player";
+	public SVRPlayer(){
+		name = "SVR Player";
 		random = new Random();
 	}
 	
@@ -48,6 +53,7 @@ public class SVMPlayer extends stockmarket.sim.Player {
 	public void learn(ArrayList<EconomicIndicator> indicators,
 			ArrayList<Stock> stocks) {
 //		create the svm_problem and parameter to train an svm for each individual stock
+		System.out.println("Setting up svm problems");
 		ArrayList<svm_problem> problems = new ArrayList<svm_problem>();
 		ArrayList<svm_parameter> params = new ArrayList<svm_parameter>();
 		for (Stock stock : stocks){
@@ -55,10 +61,11 @@ public class SVMPlayer extends stockmarket.sim.Player {
 			problem.y = getLabels(stock);
 			problem.x = getTrainingX(stock,indicators);
 			problem.l = problem.y.length;
+			problems.add(problem);
 			//add the svm params
 			svm_parameter param = new svm_parameter();
             // default values
-            param.svm_type = svm_parameter.C_SVC;
+            param.svm_type = svm_parameter.EPSILON_SVR; //for regression instead of classification
             param.kernel_type = svm_parameter.RBF;
             param.degree = 3;
             param.gamma = 0;
@@ -76,50 +83,54 @@ public class SVMPlayer extends stockmarket.sim.Player {
             params.add(param);
 		}
 		
+		
 		//train an svm model for each stock
 		ArrayList<svm_model> models = new ArrayList<svm_model>();
 		for (int i=0;i<problems.size();i++){
+			System.out.println("training "+stocks.get(i).getName());
 			svm_problem prob = problems.get(i);
-			
-		}
-		
-		System.out.println("Indicators");
-		for (EconomicIndicator indicator : indicators){
-			System.out.println(indicator);
+			svm_parameter param = params.get(i);
+			models.add(svm.svm_train(prob, param));
 		}
 
 	}
 	
 	private double[] getLabels(Stock stock){
-		//buy = 1
-		//hold = 0
-		//sell = -1
-		//buy when above transaction fee, hold when within transactionFee of 0, sell when below
+		//price of the stock in the next round
 		double[] result = new double[stock.getHistory().size()-1];
 		for(int i=1;i<result.length;i++){
-			double diff = stock.getPriceAtRound(i) - stock.getPriceAtRound(i-1);
-			if(diff - transactionFee > 0)
-				result[i-1] = (double) 1;
-			else if(-transactionFee < diff && diff < transactionFee)
-				result[i-1] = (double) 0;
-			else
-				result[i-1] = (double) -1;
+			result[i-1] = stock.getPriceAtRound(i);
 		}
 		return result;
 	}
 	
 	private svm_node[][] getTrainingX(Stock stock, ArrayList<EconomicIndicator> indicators){
 		//attributes are each economic indicator and then the current round price
+		//scale the inputs to be [0,1)
+		indicatorMax = new ArrayList<Double>();
+		indicatorMin = new ArrayList<Double>();
+		for(int i=0;i<indicators.size();i++){
+			indicatorMin.add(Collections.min(indicators.get(i).getHistory()));
+			indicatorMax.add(Collections.max(indicators.get(i).getHistory()));
+		}
+		stockMax.put(stock, Collections.max(stock.getHistory()));
+		stockMin.put(stock, Collections.min(stock.getHistory()));
+		
+		//svm_node creation
 		svm_node [][] nodes = (svm_node[][]) new svm_node[stock.getHistory().size()-1][indicators.size()+1];
 		for(int i=0;i<stock.getHistory().size()-1;i++){
 			int j=0;
 			while(j<indicators.size()){
 				svm_node node = new svm_node();
-				nodes[i][j+1] = node;
+				node.index = j+1;
+				node.value = (indicators.get(j).getValueAtRound(i) - indicatorMin.get(j))/(indicatorMax.get(j)-indicatorMin.get(j));
+				nodes[i][j] = node;
 				j++;
 			}
 			svm_node node = new svm_node();
-			nodes[i][j+1] = node;
+			node.index = j+1;
+			node.value = (stock.getPriceAtRound(i) - stockMin.get(stock))/(stockMax.get(stock)-stockMin.get(stock));
+			nodes[i][j] = node;
 		}
 		return nodes;
 	}
@@ -181,6 +192,29 @@ public class SVMPlayer extends stockmarket.sim.Player {
 		trades.add(new Trade(type, stockToTrade, tradeAmount));
 		System.out.println(trades.get(0));
 		return trades;
+	}
+	
+	private svm_node[][] getTestX(Stock stock, ArrayList<EconomicIndicator> indicators){
+		//attributes are each economic indicator and then the current round price
+		//scale the inputs to be [0,1)
+		
+		//svm_node creation
+		svm_node [][] nodes = (svm_node[][]) new svm_node[stock.getHistory().size()-1][indicators.size()+1];
+		for(int i=0;i<stock.getHistory().size()-1;i++){
+			int j=0;
+			while(j<indicators.size()){
+				svm_node node = new svm_node();
+				node.index = j+1;
+				node.value = (indicators.get(j).getValueAtRound(i) - indicatorMin.get(j))/(indicatorMax.get(j)-indicatorMin.get(j));
+				nodes[i][j] = node;
+				j++;
+			}
+			svm_node node = new svm_node();
+			node.index = j+1;
+			node.value = (stock.getPriceAtRound(i) - stockMin.get(stock))/(stockMax.get(stock)-stockMin.get(stock));
+			nodes[i][j] = node;
+		}
+		return nodes;
 	}
 
 	
