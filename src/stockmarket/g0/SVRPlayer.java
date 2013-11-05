@@ -1,13 +1,19 @@
 package stockmarket.g0;
 
+import java.io.PrintStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Collections;
+import java.util.Set;
 
 import stockmarket.sim.EconomicIndicator;
+import stockmarket.sim.Market;
 import stockmarket.sim.Portfolio;
 import stockmarket.sim.Stock;
 import stockmarket.sim.Trade;
@@ -43,6 +49,8 @@ public class SVRPlayer extends stockmarket.sim.Player {
 	private ArrayList<Double> indicatorMin;
 	private HashMap<Stock,Double> stockMax = new HashMap<Stock,Double>();
 	private HashMap<Stock,Double> stockMin = new HashMap<Stock,Double>();
+	private HashMap<Stock,svm_model> models = new HashMap<Stock,svm_model>();
+	private HashMap<Stock,Double> priceDiff = new HashMap<Stock,Double>();
 	
 	public SVRPlayer(){
 		name = "SVR Player";
@@ -52,8 +60,29 @@ public class SVRPlayer extends stockmarket.sim.Player {
 	@Override
 	public void learn(ArrayList<EconomicIndicator> indicators,
 			ArrayList<Stock> stocks) {
+		
+		transactionFee = Market.getTransactionFee();
+				
+		create_models(indicators,stocks);
+
+	}
+	
+	private void create_models(ArrayList<EconomicIndicator> indicators,
+			ArrayList<Stock> stocks){
+		
+		PrintStream originalStream = System.out;
+
+		PrintStream dummyStream = new PrintStream(new OutputStream(){
+		    public void write(int b) {
+		        //NO-OP
+		    }
+		});
+		
 //		create the svm_problem and parameter to train an svm for each individual stock
-		System.out.println("Setting up svm problems");
+		System.out.println("Training...");
+		
+		System.setOut(dummyStream);
+		
 		ArrayList<svm_problem> problems = new ArrayList<svm_problem>();
 		ArrayList<svm_parameter> params = new ArrayList<svm_parameter>();
 		for (Stock stock : stocks){
@@ -85,14 +114,15 @@ public class SVRPlayer extends stockmarket.sim.Player {
 		
 		
 		//train an svm model for each stock
-		ArrayList<svm_model> models = new ArrayList<svm_model>();
 		for (int i=0;i<problems.size();i++){
-			System.out.println("training "+stocks.get(i).getName());
+			Stock stock = stocks.get(i);
 			svm_problem prob = problems.get(i);
 			svm_parameter param = params.get(i);
-			models.add(svm.svm_train(prob, param));
+			models.put(stock,svm.svm_train(prob, param));
 		}
-
+		
+		System.setOut(originalStream);
+		
 	}
 	
 	private double[] getLabels(Stock stock){
@@ -156,64 +186,67 @@ public class SVRPlayer extends stockmarket.sim.Player {
 	public ArrayList<Trade> placeTrade(int currentRound,
 			ArrayList<EconomicIndicator> indicators, ArrayList<Stock> stocks, Portfolio portfolioCopy) {
 		System.out.println("\nRound " + currentRound + "\n" + portfolioCopy);
+		
 		ArrayList<Trade> trades = new ArrayList<Trade>();
-		int type;
-		int tradeAmount;
-		Stock stockToTrade;
-		Object[] myStocks = portfolioCopy.getAllStocks().toArray();
 		
-		if(Math.abs(random.nextInt() %2) > 0 && myStocks.length > 0){
-			type = Trade.SELL;
-			int pickedStock = Math.abs(random.nextInt()%(myStocks.length));
-			stockToTrade = (Stock) myStocks[pickedStock];
-			int sharesOwned = portfolioCopy.getSharesOwned(stockToTrade);
-			if (sharesOwned <= 0){
-				tradeAmount = 0;
+		//first, re-train the models based on the new round
+		create_models(indicators,stocks);
+		//now, create a price prediction differential for each stock and keep track of the max
+		double max = 0;
+		Stock winner = null;
+		for (Stock stock: stocks){
+			svm_model model = models.get(stock);
+			double new_price = svm.svm_predict(model, getTestX(stock,indicators,currentRound));
+			double diff = new_price - stock.currentPrice();
+			priceDiff.put(stock, diff);
+			if(diff>max){
+				winner = stock;
+				max = diff;
 			}
-			else{
-				tradeAmount = Math.abs(random.nextInt()%(portfolioCopy.getSharesOwned(stockToTrade)));
-			}
-			
 		}
-		else{
-			stockToTrade = stocks.get(Math.abs(random.nextInt()%10));
-			double amountCanBuy = portfolioCopy.getCapital() / stockToTrade.currentPrice();
-			if ((int) amountCanBuy <= 0){
-				tradeAmount = 0;
+		//System.out.println("winner is: "+ winner.getName()+"; price diff="+ max);
+		
+		//sell all stocks not the winner
+		Set<Stock> myStocks = portfolioCopy.getAllStocks();
+		double capital = portfolioCopy.getCapital();
+		for(Stock stock : myStocks){
+			if(winner == null || !stock.getName().equals(winner.getName())){
+				int amount = portfolioCopy.getSharesOwned(stock);
+				double price = stock.currentPrice();
+				trades.add(new Trade(Trade.SELL,stock,amount));
+				capital+=amount*price;
 			}
-			else{
-				tradeAmount = Math.abs(random.nextInt()%((int)amountCanBuy));
-			}
-			
-			type = Trade.BUY;
-			
 		}
 		
-		trades.add(new Trade(type, stockToTrade, tradeAmount));
-		System.out.println(trades.get(0));
+		//purchase as much as you can of the winner
+		if(winner != null){
+			int amount = (int)Math.floor(capital/winner.currentPrice());
+			trades.add(new Trade(Trade.BUY,winner,amount));
+			System.out.println("Buying "+amount+" of "+winner.getName()+" for "+winner.currentPrice());
+		}
+		
+		
 		return trades;
 	}
 	
-	private svm_node[][] getTestX(Stock stock, ArrayList<EconomicIndicator> indicators){
+	private svm_node[] getTestX(Stock stock, ArrayList<EconomicIndicator> indicators, int currentRound){
 		//attributes are each economic indicator and then the current round price
 		//scale the inputs to be [0,1)
 		
 		//svm_node creation
-		svm_node [][] nodes = (svm_node[][]) new svm_node[stock.getHistory().size()-1][indicators.size()+1];
-		for(int i=0;i<stock.getHistory().size()-1;i++){
-			int j=0;
-			while(j<indicators.size()){
-				svm_node node = new svm_node();
-				node.index = j+1;
-				node.value = (indicators.get(j).getValueAtRound(i) - indicatorMin.get(j))/(indicatorMax.get(j)-indicatorMin.get(j));
-				nodes[i][j] = node;
-				j++;
-			}
+		svm_node [] nodes = (svm_node[]) new svm_node[indicators.size()+1];
+		int j=0;
+		while(j<indicators.size()){
 			svm_node node = new svm_node();
 			node.index = j+1;
-			node.value = (stock.getPriceAtRound(i) - stockMin.get(stock))/(stockMax.get(stock)-stockMin.get(stock));
-			nodes[i][j] = node;
+			node.value = (indicators.get(j).getValueAtRound(currentRound) - indicatorMin.get(j))/(indicatorMax.get(j)-indicatorMin.get(j));
+			nodes[j] = node;
+			j++;
 		}
+		svm_node node = new svm_node();
+		node.index = j+1;
+		node.value = (stock.getPriceAtRound(currentRound) - stockMin.get(stock))/(stockMax.get(stock)-stockMin.get(stock));
+		nodes[j] = node;
 		return nodes;
 	}
 
