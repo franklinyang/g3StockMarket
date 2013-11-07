@@ -20,8 +20,59 @@ public class OodPlayer extends stockmarket.sim.Player {
 	double[][] regressionOutput;
 	
 	public OodPlayer(){
-		name = "Random Player";
+		name = "Ood Player";
 		random = new Random();
+	}
+	
+	private double[][] getRegressionCoefficients(ArrayList<EconomicIndicator> indicators,
+			ArrayList<Stock> stocks) {
+		
+		int m = indicators.size() + 2; //the number of independent variables: indicators + last period price + one constant
+		int n = indicators.get(0).getHistory().size() - 1;// the number of training data sets; confused with the last item
+		int stockNum = stocks.size();
+		double[][] result = new double[stockNum][m]; 
+		
+		double[][] trainingData = new double[m - 1][n];
+		double[][] currentPrice = new double[stockNum][n]; // store dependent variables: each period price
+		
+		for (int i = 0; i < indicators.size(); i ++) { // push indicators' historical data to trainingData array
+			
+			EconomicIndicator indicator = indicators.get(i); 
+			for (int j = 0; j < n; j ++) {
+
+				trainingData[i][j] = indicator.getHistory().get(j);
+			}
+		}
+		
+		int stockIndex = 0;
+		for (Stock stock : stocks) { // get the regression coefficients for each stock
+			
+			trainingData[m - 2][0] = 0; 
+			for (int i = 0; i < n; i ++) { // push stocks' historical data to trainingData array
+				
+				currentPrice[stockIndex][i] = stock.getHistory().get(i);
+				
+				if (i != 0) {
+					trainingData[m - 2][i] = stock.getHistory().get(i - 1);
+				}
+			}
+			
+			double[] v = new double[m];
+			double[] dt = new double[4];
+			
+			LinearRegression.implemation(trainingData, currentPrice[stockIndex], m - 1, n, result[stockIndex], dt, v);
+			stockIndex ++;
+		}
+		
+//		for(int i = 0; i < stockNum; i++) {
+//			System.err.println("+++++++++++++++++++++++++++++++++++++++++");
+//			System.err.println("Stock " + i);
+//			for(int j = 0; j < m; j++) {
+//				System.err.print(result[i][j] + ", ");
+//			}
+//		}
+		
+		return result;
 	}
 	
 	@Override
@@ -29,38 +80,15 @@ public class OodPlayer extends stockmarket.sim.Player {
 			ArrayList<Stock> stocks) {
 		ArrayList<Double> indicatorHistory;
 		
-		regressionOutput = new double[indicators.size()][indicators.get(0).getHistory().size()];
-		
-		// setting x in LinearRegression.implementation
-		double[][] trainingData = new double[indicators.size()][indicators.get(0).getHistory().size()];
-		for(int i = 0; i < indicators.size(); i++) {
-			indicatorHistory = indicators.get(i).getHistory();
-			for(int j = 0; j < trainingData[i].length; j++) {
-				trainingData[i][j] = indicatorHistory.get(j);
-			}
-		}
-		
-		// setting y in LinearRegression.implementation
-		for(int s = 0; s < stocks.size(); s++) {
-			ArrayList<Double> stockHistory = stocks.get(s).getHistory();
-			double[] stockData = new double[stocks.get(s).getHistory().size()];
-			double[] coeffs = new double[indicators.size()];
-			for(int i = 0; i < stockData.length; i++) {
-				stockData[i] = stockHistory.get(i);
-			}
-			int m = indicators.size();
-			LinearRegression.implemation(trainingData, stockData, indicators.size(), stockData.length, coeffs, new double[4], new double[m]);
-			for(int t = 0; t < m; t++) {
-				regressionOutput[t][s] = coeffs[t];
-			}
-		}
-		for(int i = 0; i < regressionOutput.length; i++) {
-			System.err.println("+++++++++++++++++++++++++++++++++++++++++");
-			System.err.println("Stock " + i);
-			for(int j = 0; j < regressionOutput[0].length; j++) {
-				System.err.print(regressionOutput[i][j] + ", ");
-			}
-		}
+//		regressionOutput = getRegressionCoefficients(indicators, stocks);
+
+//		for (int i = 0; i < stocks.size(); i++) {
+//			System.err.println("+++++++++++++++++++++++++++++++++++++++++");
+//			System.err.println("Stock " + i);
+//			for (int j = 0; j < indicators.size() + 2; j++) {
+//				System.err.print(regressionOutput[i][j] + ", ");
+//			}
+//		}
 	}
 
 	/*
@@ -90,34 +118,57 @@ public class OodPlayer extends stockmarket.sim.Player {
 		Stock stockToTrade;
 		Object[] myStocks = portfolioCopy.getAllStocks().toArray();
 		
-		if(Math.abs(random.nextInt() %2) > 0 && myStocks.length > 0){
-			type = Trade.SELL;
-			int pickedStock = Math.abs(random.nextInt()%(myStocks.length));
-			stockToTrade = (Stock) myStocks[pickedStock];
+		regressionOutput = getRegressionCoefficients(indicators, stocks);
+		
+		for (int i = 0; i < myStocks.length; i ++) {
+			
+			stockToTrade = (Stock) myStocks[i];
 			int sharesOwned = portfolioCopy.getSharesOwned(stockToTrade);
 			if (sharesOwned <= 0){
 				tradeAmount = 0;
+			} else{
+				tradeAmount = sharesOwned;
 			}
-			else{
-				tradeAmount = Math.abs(random.nextInt()%(portfolioCopy.getSharesOwned(stockToTrade)));
-			}
-		}
-		else{
-			stockToTrade = stocks.get(Math.abs(random.nextInt()%10));
-			double amountCanBuy = portfolioCopy.getCapital() / stockToTrade.currentPrice();
-			if ((int) amountCanBuy <= 0){
-				tradeAmount = 0;
-			}
-			else{
-				tradeAmount = Math.abs(random.nextInt()%((int)amountCanBuy));
-			}
-			
-			type = Trade.BUY;
-			
+			portfolioCopy.sellStock(stockToTrade, tradeAmount);
+			trades.add(new Trade(Trade.SELL, stockToTrade, tradeAmount));
 		}
 		
-		trades.add(new Trade(type, stockToTrade, tradeAmount));
-		System.out.println(trades.get(0));
+		double maxSlope = 0;
+		int maxIndex = 0;
+		for (int i = 0; i < stocks.size(); i++) {
+			
+			double predictPrice = 0;
+			for (int j = 0; j < indicators.size(); j ++) {
+
+				predictPrice += (float)(regressionOutput[i][j]) * (float)(indicators.get(j).currentValue());
+			}
+			
+			int historySize = stocks.get(i).getHistory().size();
+			double lastPrice = stocks.get(i).getHistory().get(historySize - 3);
+			predictPrice += lastPrice * regressionOutput[i][indicators.size() - 2];
+			predictPrice += regressionOutput[i][indicators.size() - 1];
+			
+			double currentSlope = (predictPrice - lastPrice) / lastPrice;
+			if (i == 0) {
+				
+				maxSlope = currentSlope;
+				maxIndex = 0;
+			} else {
+				
+				if (currentSlope > maxSlope) {
+					maxSlope = currentSlope;
+					maxIndex = i;
+				}
+			}
+		}
+		
+//		if (maxSlope > 0) {
+			
+			stockToTrade = stocks.get(maxIndex);
+			tradeAmount = (int) (portfolioCopy.getCapital() / stockToTrade.currentPrice());
+			trades.add(new Trade(Trade.BUY, stockToTrade, tradeAmount));
+//		}
+
 		return trades;
 	}
 
